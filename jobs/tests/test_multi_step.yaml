@@ -1,0 +1,36 @@
+job_name: test_multi_step
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_products"
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_transactions"
+
+steps:
+  - name: load_products
+    source:
+      connection: source_oracle
+      query: "SELECT product_id, name, description, price, category, created_at FROM products WHERE category = :cat"
+    target:
+      connection: target_oracle
+      table: stg_products
+      batch_size: 5000
+
+  - name: load_transactions
+    source:
+      connection: source_oracle
+      query: "SELECT txn_id, account_id, amount, currency, txn_date, status, entity_id FROM transactions WHERE entity_id IN (:entity_list)"
+    target:
+      connection: target_oracle
+      table: stg_transactions
+      batch_size: 50
+
+parameters:
+  cat:
+    type: static
+    value: "Electronics"
+  entity_list:
+    type: query
+    connection: source_oracle
+    query: "SELECT entity_id FROM active_entities WHERE is_active = 1"
+    column: entity_id

@@ -1,0 +1,16 @@
+connections:
+  source_oracle:
+    type: oracle
+    host: localhost
+    port: 1521
+    service_name: XEPDB1
+    username: source_user
+    password: SourcePass123
+
+  target_oracle:
+    type: oracle
+    host: localhost
+    port: 1521
+    service_name: XEPDB1
+    username: target_user
+    password: TargetPass123

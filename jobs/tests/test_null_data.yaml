@@ -1,0 +1,15 @@
+job_name: test_null_data
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_products"
+
+steps:
+  - name: load_products_with_nulls
+    source:
+      connection: source_oracle
+      query: "SELECT product_id, name, description, price, category, created_at FROM products"
+    target:
+      connection: target_oracle
+      table: stg_products
+      batch_size: 5000

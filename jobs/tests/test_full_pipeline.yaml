@@ -1,0 +1,41 @@
+job_name: test_full_pipeline
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_orders"
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_customers"
+
+steps:
+  - name: load_orders
+    source:
+      connection: source_oracle
+      query: >
+        SELECT order_id, customer_id, order_date, status, total_amount,
+               entity_id, created_at, updated_at
+        FROM orders
+        WHERE entity_id IN (:entity_list)
+    target:
+      connection: target_oracle
+      table: stg_orders
+      batch_size: 5000
+
+  - name: load_customers
+    source:
+      connection: source_oracle
+      query: "SELECT customer_id, name, email, entity_id, updated_at FROM customers WHERE entity_id IN (:entity_list)"
+    target:
+      connection: target_oracle
+      table: stg_customers
+      batch_size: 5000
+
+post_sql:
+  - connection: target_oracle
+    query: "CALL sp_transform_orders()"
+  - connection: target_oracle
+    query: "CALL sp_transform_customers()"
+
+parameters:
+  entity_list:
+    type: static
+    value: ["ENT001", "ENT002"]

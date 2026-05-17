@@ -1,0 +1,24 @@
+job_name: test_large_volume
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_large_events"
+
+steps:
+  - name: load_large_events
+    source:
+      connection: source_oracle
+      query: >
+        SELECT event_id, session_id, user_id, event_type, payload,
+               amount, currency, region, created_at, is_processed
+        FROM large_events
+    target:
+      connection: target_oracle
+      table: stg_large_events
+      batch_size: 10000
+
+post_sql:
+  - connection: target_oracle
+    query: "UPDATE stg_large_events SET is_processed = 1 WHERE is_processed = 0"
+
+parameters: {}

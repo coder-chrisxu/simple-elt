@@ -1,0 +1,49 @@
+job_name: load_customer_orders
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_orders"
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_customers"
+
+steps:
+  - name: load_orders
+    source:
+      connection: source_oracle
+      query: >
+        SELECT order_id, customer_id, order_date, status, total_amount,
+               created_at, updated_at
+        FROM orders
+        WHERE updated_at > :last_run
+        AND entity_id IN (:entity_list)
+    target:
+      connection: target_oracle
+      table: stg_orders
+      batch_size: 5000
+
+  - name: load_customers
+    source:
+      connection: source_oracle
+      query: >
+        SELECT customer_id, name, email, entity_id, updated_at
+        FROM customers
+        WHERE entity_id IN (:entity_list)
+    target:
+      connection: target_oracle
+      table: stg_customers
+      batch_size: 5000
+
+post_sql:
+  - connection: target_oracle
+    query: "CALL sp_transform_orders()"
+  - connection: target_oracle
+    query: "CALL sp_transform_customers()"
+
+parameters:
+  last_run:
+    type: query
+    connection: target_oracle
+    query: "SELECT NVL(MAX(updated_at), TO_DATE('2000-01-01','YYYY-MM-DD')) AS val FROM stg_orders"
+  entity_list:
+    type: static
+    value: ["ENT001", "ENT002", "ENT003"]

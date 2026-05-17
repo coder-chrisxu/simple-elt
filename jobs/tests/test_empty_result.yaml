@@ -1,0 +1,15 @@
+job_name: test_empty_result
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_archived_orders"
+
+steps:
+  - name: load_archived
+    source:
+      connection: source_oracle
+      query: "SELECT order_id, customer_id, total_amount, entity_id FROM archived_orders"
+    target:
+      connection: target_oracle
+      table: stg_archived_orders
+      batch_size: 5000

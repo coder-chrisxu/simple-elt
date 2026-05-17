@@ -1,0 +1,11 @@
+job_name: test_batch_chunking
+
+steps:
+  - name: load_transactions
+    source:
+      connection: source_oracle
+      query: "SELECT txn_id, account_id, amount, currency, txn_date, status, entity_id FROM transactions"
+    target:
+      connection: target_oracle
+      table: stg_transactions
+      batch_size: 50

@@ -1,0 +1,22 @@
+job_name: test_query_params
+
+steps:
+  - name: load_orders_by_entity
+    source:
+      connection: source_oracle
+      query: >
+        SELECT order_id, customer_id, order_date, status, total_amount,
+               entity_id, created_at, updated_at
+        FROM orders
+        WHERE entity_id IN (:active_entities)
+    target:
+      connection: target_oracle
+      table: stg_orders
+      batch_size: 5000
+
+parameters:
+  active_entities:
+    type: query
+    connection: source_oracle
+    query: "SELECT entity_id FROM active_entities WHERE is_active = 1"
+    column: entity_id

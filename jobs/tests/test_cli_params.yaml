@@ -1,0 +1,15 @@
+job_name: test_cli_params
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_orders"
+
+steps:
+  - name: load_filtered_orders
+    source:
+      connection: source_oracle
+      query: "SELECT order_id, customer_id, order_date, status, total_amount, entity_id, created_at, updated_at FROM orders WHERE status = :status_filter"
+    target:
+      connection: target_oracle
+      table: stg_orders
+      batch_size: 5000
