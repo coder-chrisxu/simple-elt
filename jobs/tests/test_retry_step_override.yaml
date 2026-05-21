@@ -3,7 +3,7 @@ steps:
   - name: load_no_retry
     source:
       connection: source_oracle
-      query: "SELECT * FROM src_products WHERE category = 'Electronics'"
+      query: "SELECT product_id, name, description, price, category, created_at FROM products WHERE category = 'Electronics'"
     target:
       connection: target_oracle
       table: stg_products
@@ -15,7 +15,7 @@ steps:
   - name: load_inherits_no_retry
     source:
       connection: source_oracle
-      query: "SELECT * FROM src_products WHERE category = 'Books'"
+      query: "SELECT product_id, name, description, price, category, created_at FROM products WHERE category = 'Books'"
     target:
       connection: target_oracle
       table: stg_products
