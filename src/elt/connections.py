@@ -12,6 +12,10 @@ class ConnectionManager:
         self._config = connections_config
         self._cache: dict[str, object] = {}
 
+    def get_config(self, name: str) -> dict:
+        """Return the raw config dict for a named connection."""
+        return self._config.get(name, {})
+
     def get(self, name: str):
         """Return a cached adapter for the named connection, creating it if needed."""
         if name not in self._config:

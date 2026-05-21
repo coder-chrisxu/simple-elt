@@ -1,3 +1,4 @@
+import re
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -29,7 +30,6 @@ class OracleErrorClassifier(ErrorClassifier):
         12541,  # TNS:no listener
         12560,  # TNS:protocol adapter error
         27102,  # out of memory (can be transient under load)
-        3135,   # connection lost contact (duplicate for safety)
     }
 
     def classify(self, exception: Exception) -> ErrorClass:
@@ -51,7 +51,6 @@ class OracleErrorClassifier(ErrorClassifier):
     @staticmethod
     def _extract_ora_code(message: str) -> int | None:
         """Extract the numeric code from an ORA-XXXXX string."""
-        import re
         match = re.search(r"ORA-(\d+)", message)
         return int(match.group(1)) if match else None
 

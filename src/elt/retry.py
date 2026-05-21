@@ -1,6 +1,6 @@
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from elt.errors import ErrorClassifier, ErrorClass
@@ -67,6 +67,16 @@ def validate_retry_config(config: dict[str, Any]) -> list[str]:
     return errors
 
 
+class RetryResult:
+    """Carries the return value and the attempt number that succeeded."""
+
+    __slots__ = ("value", "attempt")
+
+    def __init__(self, value: Any, attempt: int):
+        self.value = value
+        self.attempt = attempt
+
+
 class RetryExecutor:
     """Wraps a callable with retry logic."""
 
@@ -80,13 +90,17 @@ class RetryExecutor:
         self._classifier = classifier
         self._on_retry = on_retry
 
-    def execute(self, func: Callable, *args, **kwargs) -> Any:
-        """Execute func with retry logic according to the policy."""
+    def execute(self, func: Callable, *args, **kwargs) -> RetryResult:
+        """Execute func with retry logic according to the policy.
+
+        Returns a RetryResult with the return value and the attempt that succeeded.
+        """
         last_exception = None
 
         for attempt in range(1, self._policy.max_attempts + 1):
             try:
-                return func(*args, **kwargs)
+                result = func(*args, **kwargs)
+                return RetryResult(result, attempt)
             except Exception as e:
                 last_exception = e
                 error_class = self._classifier.classify(e)

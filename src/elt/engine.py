@@ -84,7 +84,7 @@ class Engine:
 
     def _get_classifier(self, connection_name: str):
         """Get the error classifier for a connection's adapter type."""
-        config = self._cm._config.get(connection_name, {})
+        config = self._cm.get_config(connection_name)
         adapter_type = config.get("type", "oracle")
         classifier_cls = CLASSIFIER_MAP.get(adapter_type)
         if classifier_cls is None:
@@ -115,7 +115,7 @@ class Engine:
             timer = StepTimer()
             with timer:
                 logger.info("Running pre-sql on %s", item["connection"])
-                self._execute_with_retry(
+                attempt = self._execute_with_retry(
                     job, item, job_name, "pre_sql",
                     lambda: self._cm.get(item["connection"]).execute(sql, bind or None),
                     [item["connection"]],
@@ -123,7 +123,7 @@ class Engine:
             self._audit.record(
                 job_name=job_name, step_name="pre_sql",
                 status="success", started_at=timer.started_at,
-                finished_at=timer.finished_at, attempt=1,
+                finished_at=timer.finished_at, attempt=attempt,
             )
 
     def _run_post_sql(self, job: dict, params: dict, job_name: str) -> None:
@@ -132,7 +132,7 @@ class Engine:
             timer = StepTimer()
             with timer:
                 logger.info("Running post-sql on %s", item["connection"])
-                self._execute_with_retry(
+                attempt = self._execute_with_retry(
                     job, item, job_name, "post_sql",
                     lambda: self._cm.get(item["connection"]).execute(sql, bind or None),
                     [item["connection"]],
@@ -140,7 +140,7 @@ class Engine:
             self._audit.record(
                 job_name=job_name, step_name="post_sql",
                 status="success", started_at=timer.started_at,
-                finished_at=timer.finished_at, attempt=1,
+                finished_at=timer.finished_at, attempt=attempt,
             )
 
     def _run_steps(self, job: dict, params: dict, job_name: str) -> None:
@@ -151,7 +151,9 @@ class Engine:
             timer = StepTimer()
             try:
                 with timer:
-                    rows_loaded = self._execute_step_with_retry(job, step, params, job_name, step_name)
+                    rows_loaded, attempt = self._execute_step_with_retry(
+                        job, step, params, job_name, step_name,
+                    )
                 logger.info(
                     "Step '%s' complete: %d rows in %.1fs",
                     step_name, rows_loaded, timer.elapsed_seconds,
@@ -160,7 +162,7 @@ class Engine:
                     job_name=job_name, step_name=step_name,
                     status="success", rows_affected=rows_loaded,
                     started_at=timer.started_at, finished_at=timer.finished_at,
-                    attempt=1,
+                    attempt=attempt,
                 )
             except Exception as e:
                 logger.error("Step '%s' failed: %s", step_name, e)
@@ -192,36 +194,38 @@ class Engine:
 
     def _execute_step_with_retry(
         self, job: dict, step: dict, params: dict, job_name: str, step_name: str,
-    ) -> int:
-        """Execute a step, optionally with retry logic."""
+    ) -> tuple[int, int]:
+        """Execute a step, optionally with retry logic. Returns (rows_loaded, attempt)."""
         policy = self._get_retry_policy(step, job)
         if policy is None or not policy.is_enabled:
-            return self._execute_step(step, params)
+            return self._execute_step(step, params), 1
 
         connections = [step["source"]["connection"], step["target"]["connection"]]
         classifier = self._get_classifier(connections[0])
         if classifier is None:
-            return self._execute_step(step, params)
+            return self._execute_step(step, params), 1
 
         callback = self._make_retry_callback(job_name, step_name, connections)
         executor = RetryExecutor(policy, classifier, on_retry=callback)
-        return executor.execute(self._execute_step, step, params)
+        result = executor.execute(self._execute_step, step, params)
+        return result.value, result.attempt
 
     def _execute_with_retry(
         self, job: dict, context: dict, job_name: str, step_name: str,
         func, connections: list[str],
-    ) -> None:
-        """Execute a function, optionally with retry logic."""
+    ) -> int:
+        """Execute a function, optionally with retry logic. Returns the attempt that succeeded."""
         policy = self._get_retry_policy(context, job)
         if policy is None or not policy.is_enabled:
             func()
-            return
+            return 1
 
         classifier = self._get_classifier(connections[0])
         if classifier is None:
             func()
-            return
+            return 1
 
         callback = self._make_retry_callback(job_name, step_name, connections)
         executor = RetryExecutor(policy, classifier, on_retry=callback)
-        executor.execute(func)
+        result = executor.execute(func)
+        return result.attempt
