@@ -30,6 +30,18 @@ class ConnectionManager:
 
         return self._cache[name]
 
+    def reconnect(self, name: str):
+        """Close and re-create the adapter for the named connection."""
+        if name not in self._config:
+            raise ValueError(f"Unknown connection: '{name}'")
+        if name in self._cache:
+            try:
+                self._cache[name].close()
+            except Exception:
+                pass
+            del self._cache[name]
+        return self.get(name)
+
     def close_all(self) -> None:
         """Close all cached connections."""
         for adapter in self._cache.values():

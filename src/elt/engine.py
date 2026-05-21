@@ -3,7 +3,9 @@ from typing import Any
 
 from elt.audit import AuditLogger, StepTimer
 from elt.connections import ConnectionManager
+from elt.errors import CLASSIFIER_MAP
 from elt.parameters import ParameterResolver
+from elt.retry import RetryExecutor, RetryPolicy
 
 logger = logging.getLogger("elt")
 
@@ -73,18 +75,55 @@ class Engine:
 
         return warnings
 
+    def _get_retry_policy(self, context: dict, job: dict) -> RetryPolicy | None:
+        """Resolve retry policy: context-level overrides job-level."""
+        policy = RetryPolicy.from_dict(context.get("retry"))
+        if policy is not None:
+            return policy
+        return RetryPolicy.from_dict(job.get("retry"))
+
+    def _get_classifier(self, connection_name: str):
+        """Get the error classifier for a connection's adapter type."""
+        config = self._cm._config.get(connection_name, {})
+        adapter_type = config.get("type", "oracle")
+        classifier_cls = CLASSIFIER_MAP.get(adapter_type)
+        if classifier_cls is None:
+            return None
+        return classifier_cls()
+
+    def _make_retry_callback(self, job_name: str, step_name: str, connections: list[str]):
+        """Create an on_retry callback that reconnects connections and logs to audit."""
+        def on_retry(attempt: int, exception: Exception, backoff: float) -> None:
+            for conn_name in connections:
+                try:
+                    self._cm.reconnect(conn_name)
+                    logger.debug("Reconnected: %s", conn_name)
+                except Exception as reconnect_err:
+                    logger.warning("Reconnection failed for %s: %s", conn_name, reconnect_err)
+            self._audit.record(
+                job_name=job_name,
+                step_name=step_name,
+                status="retry",
+                error_message=f"Attempt {attempt} failed: {exception}",
+                attempt=attempt,
+            )
+        return on_retry
+
     def _run_pre_sql(self, job: dict, params: dict, job_name: str) -> None:
         for item in job.get("pre_sql", []):
             sql, bind = self._params.apply_to_sql(item["query"], params)
             timer = StepTimer()
             with timer:
                 logger.info("Running pre-sql on %s", item["connection"])
-                adapter = self._cm.get(item["connection"])
-                adapter.execute(sql, bind or None)
+                self._execute_with_retry(
+                    job, item, job_name, "pre_sql",
+                    lambda: self._cm.get(item["connection"]).execute(sql, bind or None),
+                    [item["connection"]],
+                )
             self._audit.record(
                 job_name=job_name, step_name="pre_sql",
                 status="success", started_at=timer.started_at,
-                finished_at=timer.finished_at,
+                finished_at=timer.finished_at, attempt=1,
             )
 
     def _run_post_sql(self, job: dict, params: dict, job_name: str) -> None:
@@ -93,12 +132,15 @@ class Engine:
             timer = StepTimer()
             with timer:
                 logger.info("Running post-sql on %s", item["connection"])
-                adapter = self._cm.get(item["connection"])
-                adapter.execute(sql, bind or None)
+                self._execute_with_retry(
+                    job, item, job_name, "post_sql",
+                    lambda: self._cm.get(item["connection"]).execute(sql, bind or None),
+                    [item["connection"]],
+                )
             self._audit.record(
                 job_name=job_name, step_name="post_sql",
                 status="success", started_at=timer.started_at,
-                finished_at=timer.finished_at,
+                finished_at=timer.finished_at, attempt=1,
             )
 
     def _run_steps(self, job: dict, params: dict, job_name: str) -> None:
@@ -109,7 +151,7 @@ class Engine:
             timer = StepTimer()
             try:
                 with timer:
-                    rows_loaded = self._execute_step(step, params)
+                    rows_loaded = self._execute_step_with_retry(job, step, params, job_name, step_name)
                 logger.info(
                     "Step '%s' complete: %d rows in %.1fs",
                     step_name, rows_loaded, timer.elapsed_seconds,
@@ -118,6 +160,7 @@ class Engine:
                     job_name=job_name, step_name=step_name,
                     status="success", rows_affected=rows_loaded,
                     started_at=timer.started_at, finished_at=timer.finished_at,
+                    attempt=1,
                 )
             except Exception as e:
                 logger.error("Step '%s' failed: %s", step_name, e)
@@ -146,3 +189,39 @@ class Engine:
             logger.debug("Loaded %d rows (total: %d)", count, total_rows)
 
         return total_rows
+
+    def _execute_step_with_retry(
+        self, job: dict, step: dict, params: dict, job_name: str, step_name: str,
+    ) -> int:
+        """Execute a step, optionally with retry logic."""
+        policy = self._get_retry_policy(step, job)
+        if policy is None or not policy.is_enabled:
+            return self._execute_step(step, params)
+
+        connections = [step["source"]["connection"], step["target"]["connection"]]
+        classifier = self._get_classifier(connections[0])
+        if classifier is None:
+            return self._execute_step(step, params)
+
+        callback = self._make_retry_callback(job_name, step_name, connections)
+        executor = RetryExecutor(policy, classifier, on_retry=callback)
+        return executor.execute(self._execute_step, step, params)
+
+    def _execute_with_retry(
+        self, job: dict, context: dict, job_name: str, step_name: str,
+        func, connections: list[str],
+    ) -> None:
+        """Execute a function, optionally with retry logic."""
+        policy = self._get_retry_policy(context, job)
+        if policy is None or not policy.is_enabled:
+            func()
+            return
+
+        classifier = self._get_classifier(connections[0])
+        if classifier is None:
+            func()
+            return
+
+        callback = self._make_retry_callback(job_name, step_name, connections)
+        executor = RetryExecutor(policy, classifier, on_retry=callback)
+        executor.execute(func)

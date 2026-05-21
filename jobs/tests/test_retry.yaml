@@ -1,0 +1,14 @@
+job_name: test_retry
+retry:
+  max_attempts: 3
+  backoff_strategy: fixed
+  backoff_seconds: 1
+steps:
+  - name: load_with_retry
+    source:
+      connection: source_oracle
+      query: "SELECT * FROM src_products"
+    target:
+      connection: target_oracle
+      table: stg_products
+      batch_size: 5000

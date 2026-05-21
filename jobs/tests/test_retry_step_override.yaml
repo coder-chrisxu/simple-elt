@@ -1,0 +1,21 @@
+job_name: test_retry_step_override
+steps:
+  - name: load_no_retry
+    source:
+      connection: source_oracle
+      query: "SELECT * FROM src_products WHERE category = 'Electronics'"
+    target:
+      connection: target_oracle
+      table: stg_products
+    retry:
+      max_attempts: 5
+      backoff_strategy: exponential
+      backoff_seconds: 2
+      max_backoff_seconds: 30
+  - name: load_inherits_no_retry
+    source:
+      connection: source_oracle
+      query: "SELECT * FROM src_products WHERE category = 'Books'"
+    target:
+      connection: target_oracle
+      table: stg_products
