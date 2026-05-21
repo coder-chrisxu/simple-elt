@@ -7,7 +7,7 @@ steps:
   - name: load_with_retry
     source:
       connection: source_oracle
-      query: "SELECT * FROM src_products"
+      query: "SELECT product_id, name, description, price, category, created_at FROM products"
     target:
       connection: target_oracle
       table: stg_products

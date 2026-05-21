@@ -108,7 +108,12 @@ def run(job_name, jobs_dir, connections, audit_connection, params, params_file, 
     """Run an ELT job."""
     logger = logging.getLogger("elt")
 
-    registry = discover_jobs(jobs_dir)
+    try:
+        registry = discover_jobs(jobs_dir)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
     if job_name not in registry:
         click.echo(f"Job not found: {job_name}", err=True)
         click.echo(f"Available jobs: {', '.join(sorted(registry.keys()))}", err=True)
@@ -135,10 +140,13 @@ def run(job_name, jobs_dir, connections, audit_connection, params, params_file, 
         _show_retry_config(job, click.echo)
         return
 
-    engine, cm = _build_engine(connections, audit_connection)
+    try:
+        engine, cm = _build_engine(connections, audit_connection)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
     try:
-
         engine._audit.ensure_table()
         engine.run(job, cli_params)
         click.echo(f"Job '{job_name}' completed successfully.")
@@ -156,14 +164,31 @@ def run(job_name, jobs_dir, connections, audit_connection, params, params_file, 
 @click.option("--connections", "-c", default=DEFAULT_CONNECTIONS_FILE, help="Connections config file")
 def validate(job_name, jobs_dir, connections):
     """Validate job configs and connections."""
-    registry = discover_jobs(jobs_dir)
+    try:
+        registry = discover_jobs(jobs_dir)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
     if not registry:
         click.echo("No jobs found.")
         return
 
-    engine, cm = _build_engine(connections, None)
     try:
-        target_jobs = {job_name: registry[job_name]} if job_name else registry
+        engine, cm = _build_engine(connections, None)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    try:
+        if job_name:
+            if job_name not in registry:
+                click.echo(f"Job not found: {job_name}", err=True)
+                click.echo(f"Available jobs: {', '.join(sorted(registry.keys()))}", err=True)
+                sys.exit(1)
+            target_jobs = {job_name: registry[job_name]}
+        else:
+            target_jobs = registry
         all_ok = True
         for name, path in target_jobs.items():
             try:
