@@ -18,3 +18,8 @@ elt = "elt.cli:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

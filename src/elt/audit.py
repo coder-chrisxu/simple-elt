@@ -12,13 +12,18 @@ CREATE TABLE elt_audit (
     rows_affected NUMBER,
     started_at    TIMESTAMP NOT NULL,
     finished_at   TIMESTAMP,
-    error_message VARCHAR2(4000)
+    error_message VARCHAR2(4000),
+    attempt       NUMBER
 )
 """
 
+_ADD_ATTEMPT_COLUMN_SQL = """\
+ALTER TABLE elt_audit ADD attempt NUMBER
+"""
+
 _INSERT_SQL = """\
-INSERT INTO elt_audit (job_name, step_name, status, rows_affected, started_at, finished_at, error_message)
-VALUES (:job_name, :step_name, :status, :rows_affected, :started_at, :finished_at, :error_message)
+INSERT INTO elt_audit (job_name, step_name, status, rows_affected, started_at, finished_at, error_message, attempt)
+VALUES (:job_name, :step_name, :status, :rows_affected, :started_at, :finished_at, :error_message, :attempt)
 """
 
 
@@ -30,12 +35,16 @@ class AuditLogger:
         self._connection_name = connection_name
 
     def ensure_table(self) -> None:
-        """Create the audit table if it doesn't exist."""
+        """Create the audit table if it doesn't exist. Migrate if missing attempt column."""
         adapter = self._cm.get(self._connection_name)
         try:
             adapter.execute(_CREATE_TABLE_SQL)
         except Exception:
             pass  # Table already exists
+        try:
+            adapter.execute(_ADD_ATTEMPT_COLUMN_SQL)
+        except Exception:
+            pass  # Column already exists
 
     def record(
         self,
@@ -46,6 +55,7 @@ class AuditLogger:
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
         error_message: str | None = None,
+        attempt: int | None = None,
     ) -> None:
         adapter = self._cm.get(self._connection_name)
         now = datetime.now(timezone.utc)
@@ -59,6 +69,7 @@ class AuditLogger:
                 "started_at": started_at or now,
                 "finished_at": finished_at or now,
                 "error_message": error_message,
+                "attempt": attempt,
             },
         )
 

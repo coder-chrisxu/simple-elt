@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from elt.retry import validate_retry_config
+
 
 _ENV_PATTERN = re.compile(r"\$\{(\w+)\}")
 
@@ -63,6 +65,12 @@ def load_job(path: str | Path) -> dict:
     if "steps" not in job or not job["steps"]:
         raise ValueError(f"Job '{job['job_name']}' has no steps")
 
+    # Validate job-level retry
+    if "retry" in job:
+        errors = validate_retry_config(job["retry"])
+        if errors:
+            raise ValueError(f"Job '{job['job_name']}': {'; '.join(errors)}")
+
     for i, step in enumerate(job["steps"]):
         if "source" not in step:
             raise ValueError(f"Step {i} missing 'source'")
@@ -76,6 +84,10 @@ def load_job(path: str | Path) -> dict:
             raise ValueError(f"Step {i} source missing 'query'")
         if "table" not in step["target"]:
             raise ValueError(f"Step {i} target missing 'table'")
+        if "retry" in step:
+            errors = validate_retry_config(step["retry"])
+            if errors:
+                raise ValueError(f"Job '{job['job_name']}' step {i}: {'; '.join(errors)}")
 
     for sql_block in ("pre_sql", "post_sql"):
         for item in job.get(sql_block, []):
@@ -83,6 +95,10 @@ def load_job(path: str | Path) -> dict:
                 raise ValueError(f"{sql_block} item missing 'connection'")
             if "query" not in item:
                 raise ValueError(f"{sql_block} item missing 'query'")
+            if "retry" in item:
+                errors = validate_retry_config(item["retry"])
+                if errors:
+                    raise ValueError(f"Job '{job['job_name']}' {sql_block}: {'; '.join(errors)}")
 
     return job
 

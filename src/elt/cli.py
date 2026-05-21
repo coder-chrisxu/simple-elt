@@ -10,6 +10,7 @@ from elt.config import discover_jobs, load_connections, load_job
 from elt.connections import ConnectionManager
 from elt.engine import Engine
 from elt.parameters import ParameterResolver
+from elt.retry import RetryPolicy
 
 DEFAULT_JOBS_DIR = "jobs"
 DEFAULT_CONNECTIONS_FILE = "connections.yaml"
@@ -52,6 +53,40 @@ def _build_engine(connections_file: str, audit_connection: str | None) -> tuple[
     param_resolver = ParameterResolver(cm)
     engine = Engine(cm, param_resolver, audit_logger)
     return engine, cm
+
+
+def _format_retry(policy: RetryPolicy) -> str:
+    if not policy.is_enabled:
+        return "none"
+    parts = [f"{policy.max_attempts} attempts"]
+    parts.append(f"{policy.backoff_strategy} backoff")
+    parts.append(f"{policy.backoff_seconds}s base")
+    if policy.backoff_strategy == "exponential":
+        parts.append(f"{policy.max_backoff_seconds}s max")
+    return ", ".join(parts)
+
+
+def _show_retry_config(job: dict, echo) -> None:
+    job_policy = RetryPolicy.from_dict(job.get("retry"))
+    if job_policy and job_policy.is_enabled:
+        echo(f"Job retry: {_format_retry(job_policy)}")
+
+    for step in job.get("steps", []):
+        step_policy = RetryPolicy.from_dict(step.get("retry"))
+        effective = step_policy if step_policy is not None else job_policy
+        if effective and effective.is_enabled:
+            source = "step" if step_policy is not None else "job default"
+            echo(f"  Step '{step.get('name', '?')}' retry ({source}): {_format_retry(effective)}")
+        else:
+            echo(f"  Step '{step.get('name', '?')}' retry: none")
+
+    for block_name in ("pre_sql", "post_sql"):
+        for item in job.get(block_name, []):
+            item_policy = RetryPolicy.from_dict(item.get("retry"))
+            effective = item_policy if item_policy is not None else job_policy
+            if effective and effective.is_enabled:
+                source = "item" if item_policy is not None else "job default"
+                echo(f"  {block_name} retry ({source}): {_format_retry(effective)}")
 
 
 @click.group()
@@ -97,6 +132,7 @@ def run(job_name, jobs_dir, connections, audit_connection, params, params_file, 
         click.echo(f"Parameters: {list((job.get('parameters') or {}).keys())}")
         if cli_params:
             click.echo(f"CLI overrides: {list(cli_params.keys())}")
+        _show_retry_config(job, click.echo)
         return
 
     engine, cm = _build_engine(connections, audit_connection)
