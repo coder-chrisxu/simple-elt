@@ -178,6 +178,7 @@ class Engine:
         source = step["source"]
         target = step["target"]
         batch_size = target.get("batch_size", DEFAULT_BATCH_SIZE)
+        commit_per_batch = target.get("commit_per_batch", False)
 
         sql, bind = self._params.apply_to_sql(source["query"], params)
 
@@ -185,12 +186,27 @@ class Engine:
         target_adapter = self._cm.get(target["connection"])
 
         total_rows = 0
-        for batch in source_adapter.fetch_batches(sql, bind or None, batch_size):
-            count = target_adapter.insert_batch(target["table"], batch)
-            total_rows += count
-            logger.debug("Loaded %d rows (total: %d)", count, total_rows)
+        try:
+            for batch in source_adapter.fetch_batches(sql, bind or None, batch_size):
+                count = target_adapter.insert_batch(
+                    target["table"], batch, commit=commit_per_batch
+                )
+                total_rows += count
+                logger.debug("Loaded %d rows (total: %d)", count, total_rows)
 
-        return total_rows
+            if not commit_per_batch:
+                target_adapter.commit()
+                logger.debug("Committed step transaction.")
+
+            return total_rows
+        except Exception:
+            if not commit_per_batch:
+                try:
+                    target_adapter.rollback()
+                    logger.debug("Rolled back step transaction.")
+                except Exception as rollback_err:
+                    logger.warning("Step transaction rollback failed: %s", rollback_err)
+            raise
 
     def _execute_step_with_retry(
         self, job: dict, step: dict, params: dict, job_name: str, step_name: str,

@@ -17,42 +17,51 @@ class ErrorClassifier(ABC):
 
 
 class OracleErrorClassifier(ErrorClassifier):
-    """Classifies Oracle-specific errors based on ORA- error codes."""
+    """Classifies Oracle-specific errors based on ORA- and DPY- error codes."""
 
     TRANSIENT_CODES = {
+        60,     # deadlock detected
+        1033,   # ORACLE startup or shutdown in progress
+        2396,   # exceeded maximum idle time
         3113,   # end-of-file on communication channel
         3114,   # not connected to ORACLE
-        2396,   # exceeded maximum idle time
-        12571,  # TNS:packet writer failure
         3135,   # connection lost contact
-        12514,  # TNS:listener does not currently know of service
         12170,  # TNS:connect timeout occurred
+        12514,  # TNS:listener does not currently know of service
+        12520,  # TNS:listener could not find available handler
+        12537,  # TNS:connection closed
         12541,  # TNS:no listener
         12560,  # TNS:protocol adapter error
+        12571,  # TNS:packet writer failure
         27102,  # out of memory (can be transient under load)
+        # python-oracledb Thin mode driver-level transient codes
+        6001,   # connection lost or listener down
+        6005,   # connection closed
     }
 
     def classify(self, exception: Exception) -> ErrorClass:
         if isinstance(exception, (ConnectionError, TimeoutError, OSError)):
             return ErrorClass.TRANSIENT
 
-        error = getattr(exception, "args", [None])[0] if exception.args else None
-        if isinstance(error, str):
-            code = self._extract_ora_code(error)
-            if code is not None and code in self.TRANSIENT_CODES:
-                return ErrorClass.TRANSIENT
+        if hasattr(exception, "code"):
+            code_val = exception.code
+            if isinstance(code_val, int):
+                if code_val in self.TRANSIENT_CODES:
+                    return ErrorClass.TRANSIENT
+            elif isinstance(code_val, str):
+                match = re.search(r"(\d+)", code_val)
+                if match and int(match.group(1)) in self.TRANSIENT_CODES:
+                    return ErrorClass.TRANSIENT
 
-        if hasattr(exception, "code") and isinstance(exception.code, int):
-            if exception.code in self.TRANSIENT_CODES:
+        # Robustly extract codes from the string representation
+        err_str = str(exception)
+        match = re.search(r"(?:ORA|DPY)-(\d+)", err_str)
+        if match:
+            code = int(match.group(1))
+            if code in self.TRANSIENT_CODES:
                 return ErrorClass.TRANSIENT
 
         return ErrorClass.PERMANENT
-
-    @staticmethod
-    def _extract_ora_code(message: str) -> int | None:
-        """Extract the numeric code from an ORA-XXXXX string."""
-        match = re.search(r"ORA-(\d+)", message)
-        return int(match.group(1)) if match else None
 
 
 CLASSIFIER_MAP: dict[str, type[ErrorClassifier]] = {

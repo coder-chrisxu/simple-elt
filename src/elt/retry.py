@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -25,6 +26,7 @@ class RetryPolicy:
     backoff_seconds: float = DEFAULT_BACKOFF_SECONDS
     backoff_multiplier: float = DEFAULT_BACKOFF_MULTIPLIER
     max_backoff_seconds: float = DEFAULT_MAX_BACKOFF_SECONDS
+    jitter: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "RetryPolicy | None":
@@ -37,6 +39,7 @@ class RetryPolicy:
             backoff_seconds=data.get("backoff_seconds", DEFAULT_BACKOFF_SECONDS),
             backoff_multiplier=data.get("backoff_multiplier", DEFAULT_BACKOFF_MULTIPLIER),
             max_backoff_seconds=data.get("max_backoff_seconds", DEFAULT_MAX_BACKOFF_SECONDS),
+            jitter=data.get("jitter", True),
         )
 
     @property
@@ -44,11 +47,20 @@ class RetryPolicy:
         return self.max_attempts > 1
 
     def calculate_backoff(self, attempt: int) -> float:
-        """Calculate backoff delay in seconds for the given attempt (1-indexed)."""
+        """Calculate backoff delay in seconds with optional 10% random jitter for the given attempt (1-indexed)."""
         if self.backoff_strategy == "exponential":
             delay = self.backoff_seconds * (self.backoff_multiplier ** (attempt - 1))
-            return min(delay, self.max_backoff_seconds)
-        return self.backoff_seconds
+            delay = min(delay, self.max_backoff_seconds)
+        else:
+            delay = self.backoff_seconds
+
+        if not self.jitter:
+            return delay
+
+        # Add 10% random jitter
+        jitter = delay * 0.1
+        actual_delay = delay + random.uniform(-jitter, jitter)
+        return max(0.01, actual_delay)
 
 
 def validate_retry_config(config: dict[str, Any]) -> list[str]:

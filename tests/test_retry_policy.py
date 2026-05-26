@@ -66,7 +66,7 @@ class TestRetryPolicyFromDict:
 
 class TestRetryPolicyBackoff:
     def test_fixed_backoff(self):
-        policy = RetryPolicy(backoff_strategy="fixed", backoff_seconds=5.0)
+        policy = RetryPolicy(backoff_strategy="fixed", backoff_seconds=5.0, jitter=False)
         assert policy.calculate_backoff(1) == 5.0
         assert policy.calculate_backoff(2) == 5.0
         assert policy.calculate_backoff(10) == 5.0
@@ -76,6 +76,7 @@ class TestRetryPolicyBackoff:
             backoff_strategy="exponential",
             backoff_seconds=2.0,
             backoff_multiplier=2.0,
+            jitter=False,
         )
         assert policy.calculate_backoff(1) == 2.0   # 2 * 2^0
         assert policy.calculate_backoff(2) == 4.0   # 2 * 2^1
@@ -88,6 +89,7 @@ class TestRetryPolicyBackoff:
             backoff_seconds=10.0,
             backoff_multiplier=10.0,
             max_backoff_seconds=60.0,
+            jitter=False,
         )
         assert policy.calculate_backoff(1) == 10.0
         assert policy.calculate_backoff(2) == 60.0  # would be 100, capped at 60
@@ -98,6 +100,7 @@ class TestRetryPolicyBackoff:
             backoff_strategy="exponential",
             backoff_seconds=1.0,
             backoff_multiplier=3.0,
+            jitter=False,
         )
         assert policy.calculate_backoff(1) == 1.0   # 1 * 3^0
         assert policy.calculate_backoff(2) == 3.0   # 1 * 3^1
@@ -154,3 +157,16 @@ class TestValidateRetryConfig:
 
     def test_empty_config(self):
         assert validate_retry_config({}) == []
+
+
+class TestRetryPolicyJitter:
+    def test_jitter_within_bounds(self):
+        policy = RetryPolicy(backoff_strategy="fixed", backoff_seconds=10.0, jitter=True)
+        # Verify 100 samples are all within [9.0, 11.0] and not exactly 10.0
+        exact_count = 0
+        for _ in range(100):
+            val = policy.calculate_backoff(1)
+            assert 9.0 <= val <= 11.0
+            if val == 10.0:
+                exact_count += 1
+        assert exact_count < 10, "Should have randomized variation"

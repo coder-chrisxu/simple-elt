@@ -36,7 +36,15 @@ class BaseAdapter(ABC):
         """Execute a query and yield rows in batches."""
 
     @abstractmethod
-    def insert_batch(self, table: str, rows: list[dict[str, Any]]) -> int:
+    def commit(self) -> None:
+        """Commit the current transaction."""
+
+    @abstractmethod
+    def rollback(self) -> None:
+        """Rollback the current transaction."""
+
+    @abstractmethod
+    def insert_batch(self, table: str, rows: list[dict[str, Any]], commit: bool = True) -> int:
         """Insert a batch of rows into a table. Returns the number of rows inserted."""
 
     @abstractmethod

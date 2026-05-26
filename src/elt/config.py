@@ -7,14 +7,15 @@ import yaml
 from elt.retry import validate_retry_config
 
 
-_ENV_PATTERN = re.compile(r"\$\{(\w+)\}")
+_ENV_PATTERN = re.compile(r"\$\{(\w+)(?::-(.*?))?\}")
 
 
 def _interpolate_env(value: str) -> str:
-    """Replace ${VAR} placeholders with environment variable values."""
+    """Replace ${VAR} or ${VAR:-default} placeholders with environment variable values."""
     def _replace(match):
         var = match.group(1)
-        env_val = os.environ.get(var)
+        default = match.group(2)
+        env_val = os.environ.get(var, default)
         if env_val is None:
             raise ValueError(f"Environment variable {var} is not set")
         return env_val

@@ -31,26 +31,21 @@ def _chunk_list(values: list, chunk_size: int = _ORACLE_IN_LIMIT) -> list[list]:
 
 def _expand_in_clause(sql: str, param_name: str, values: list) -> str:
     """Expand :param_name in an IN clause, handling Oracle's 1000-item limit."""
-    # Case-insensitive matching for IN clause patterns
-    lower_sql = sql.lower()
-    lower_name = param_name.lower()
+    # Find matching IN ( :param_name ) allowing any whitespace
+    pattern = re.compile(
+        r"\bin\s*\(\s*:" + re.escape(param_name) + r"\s*\)",
+        re.IGNORECASE
+    )
+    match = pattern.search(sql)
 
-    patterns = [f"in (:{lower_name})", f"in(:{lower_name})"]
-    # Find which pattern matches and where
-    match_idx = -1
-    match_end = -1
-    for pattern in patterns:
-        idx = lower_sql.find(pattern)
-        if idx != -1:
-            match_idx = idx
-            match_end = idx + len(pattern)
-            break
+    if match:
+        match_idx = match.start()
+        match_end = match.end()
 
-    if match_idx != -1 and len(values) <= _ORACLE_IN_LIMIT:
-        expanded = ", ".join(_quote_value(v) for v in values)
-        return sql[:match_idx] + f"IN ({expanded})" + sql[match_end:]
+        if len(values) <= _ORACLE_IN_LIMIT:
+            expanded = ", ".join(_quote_value(v) for v in values)
+            return sql[:match_idx] + f"IN ({expanded})" + sql[match_end:]
 
-    if match_idx != -1 and len(values) > _ORACLE_IN_LIMIT:
         chunks = _chunk_list(values)
         chunk_exprs = [
             f"({', '.join(_quote_value(v) for v in chunk)})"
@@ -62,10 +57,12 @@ def _expand_in_clause(sql: str, param_name: str, values: list) -> str:
         )
         return sql[:match_idx] + f"({full_expr})" + sql[match_end:]
 
-    # Fallback: just replace the placeholder itself
-    placeholder_idx = lower_sql.find(f":{lower_name}")
-    if placeholder_idx != -1:
-        end = placeholder_idx + 1 + len(param_name)
+    # Fallback: just replace the placeholder itself using word boundaries
+    placeholder_pattern = re.compile(r":" + re.escape(param_name) + r"\b", re.IGNORECASE)
+    placeholder_match = placeholder_pattern.search(sql)
+    if placeholder_match:
+        placeholder_idx = placeholder_match.start()
+        end = placeholder_match.end()
         if len(values) <= _ORACLE_IN_LIMIT:
             expanded = ", ".join(_quote_value(v) for v in values)
             return sql[:placeholder_idx] + f"({expanded})" + sql[end:]
@@ -138,15 +135,10 @@ class ParameterResolver:
 
     @staticmethod
     def _find_placeholder(sql: str, name: str) -> str | None:
-        """Find the actual placeholder text in SQL, case-insensitive."""
-        lower_sql = sql.lower()
-        lower_name = name.lower()
-        idx = lower_sql.find(f":{lower_name}")
-        if idx == -1:
-            return None
-        # Extract the actual text from the original SQL at that position
-        actual = sql[idx:idx + 1 + len(name)]
-        return actual
+        """Find the actual placeholder text in SQL, case-insensitive with word boundary."""
+        pattern = re.compile(r":" + re.escape(name) + r"\b", re.IGNORECASE)
+        match = pattern.search(sql)
+        return match.group(0) if match else None
 
     def apply_to_sql(self, sql: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """
