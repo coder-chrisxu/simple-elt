@@ -31,27 +31,27 @@ def _chunk_list(values: list, chunk_size: int = _ORACLE_IN_LIMIT) -> list[list]:
 
 def _expand_in_clause(sql: str, param_name: str, values: list) -> str:
     """Expand :param_name in an IN clause, handling Oracle's 1000-item limit."""
-    # Find matching IN ( :param_name ) allowing any whitespace
+    # Find matching column IN ( :param_name ) allowing any whitespace
     pattern = re.compile(
-        r"\bin\s*\(\s*:" + re.escape(param_name) + r"\s*\)",
+        r"([\w\".]+)\s+in\s*\(\s*:" + re.escape(param_name) + r"\s*\)",
         re.IGNORECASE
     )
     match = pattern.search(sql)
 
     if match:
+        column = match.group(1)
         match_idx = match.start()
         match_end = match.end()
 
         if len(values) <= _ORACLE_IN_LIMIT:
             expanded = ", ".join(_quote_value(v) for v in values)
-            return sql[:match_idx] + f"IN ({expanded})" + sql[match_end:]
+            return sql[:match_idx] + f"{column} IN ({expanded})" + sql[match_end:]
 
         chunks = _chunk_list(values)
         chunk_exprs = [
             f"({', '.join(_quote_value(v) for v in chunk)})"
             for chunk in chunks
         ]
-        column = _find_in_column(sql, param_name)
         full_expr = " OR ".join(
             f"{column} IN {expr}" for expr in chunk_exprs
         )
