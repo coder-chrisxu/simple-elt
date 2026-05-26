@@ -28,7 +28,17 @@ def test_regex_in_clause_expansion():
     
     sql_space = "SELECT * FROM t WHERE id   in   (  :my_list  )"
     expanded_space = _expand_in_clause(sql_space, "my_list", [1, 2, 3])
-    assert expanded_space == "SELECT * FROM t WHERE id   IN (1, 2, 3)"
+    assert expanded_space == "SELECT * FROM t WHERE id IN (1, 2, 3)"
+
+def test_large_in_clause_expansion():
+    # List with > 1000 items (e.g. 1005 items) to test chunking expansion
+    sql = "SELECT * FROM t WHERE entity_id IN (:my_list)"
+    values = [f"ENT{i}" for i in range(1005)]
+    expanded = _expand_in_clause(sql, "my_list", values)
+    # Check that it doesn't contain duplicated entity_id before the parenthesis
+    assert "entity_id (entity_id" not in expanded
+    assert "entity_id IN ('ENT0'" in expanded
+    assert "OR entity_id IN ('ENT1000'" in expanded
 
 def test_prefix_placeholder_matching():
     # Verify prefix mismatch bug is solved

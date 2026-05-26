@@ -1,0 +1,123 @@
+job_name: test_parameter_edge_cases
+
+pre_sql:
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_orders"
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_products"
+  - connection: target_oracle
+    query: "TRUNCATE TABLE stg_transactions"
+  # Parameterized pre_sql check
+  - connection: target_oracle
+    query: "INSERT INTO stg_products (product_id, name, price, category) VALUES (999, 'Pre-SQL Test', 0.0, :status)"
+
+steps:
+  - name: test_multi_params_and_prefix_collision
+    source:
+      connection: source_oracle
+      query: >
+        SELECT order_id, customer_id, order_date, status, total_amount, entity_id, created_at, updated_at
+        FROM orders
+        WHERE status = :STATUS
+          OR (status = :status_other AND total_amount > :status_other_amount)
+    target:
+      connection: target_oracle
+      table: stg_orders
+      batch_size: 1000
+
+  - name: test_whitespace_in_clause
+    source:
+      connection: source_oracle
+      query: >
+        SELECT product_id, name, description, price, category, created_at
+        FROM products
+        WHERE category   in   (
+           :category_list
+        )
+    target:
+      connection: target_oracle
+      table: stg_products
+      batch_size: 1000
+
+  - name: test_large_in_clause_limit
+    source:
+      connection: source_oracle
+      query: >
+        WITH dummy_data AS (
+          SELECT LEVEL AS txn_id,
+                 'ACC' || LPAD(LEVEL, 4, '0') AS account_id,
+                 LEVEL * 10 AS amount,
+                 'USD' AS currency,
+                 SYSDATE AS txn_date,
+                 'COMPLETED' AS status,
+                 'ENT' || LPAD(LEVEL, 4, '0') AS entity_id
+          FROM DUAL CONNECT BY LEVEL <= 1005
+        )
+        SELECT txn_id, account_id, amount, currency, txn_date, status, entity_id
+        FROM dummy_data
+        WHERE entity_id IN (  :large_entity_list  )
+    target:
+      connection: target_oracle
+      table: stg_transactions
+      batch_size: 500
+
+  - name: test_special_characters_escaping
+    source:
+      connection: source_oracle
+      query: >
+        WITH dummy_products AS (
+          SELECT 101 AS product_id, 'Special Prod 1' AS name, 'Desc 1' AS description, 10.5 AS price, 'O''Connor''s Specials' AS category, SYSDATE AS created_at FROM DUAL
+          UNION ALL
+          SELECT 102 AS product_id, 'Special Prod 2' AS name, 'Desc 2' AS description, 20.0 AS price, 'Books''n''Stuff' AS category, SYSDATE AS created_at FROM DUAL
+          UNION ALL
+          SELECT 103 AS product_id, 'Special Prod 3' AS name, 'Desc 3' AS description, 30.0 AS price, 'Electronics' AS category, SYSDATE AS created_at FROM DUAL
+        )
+        SELECT product_id, name, description, price, category, created_at
+        FROM dummy_products
+        WHERE category IN (:special_category_list)
+    target:
+      connection: target_oracle
+      table: stg_products
+      batch_size: 1000
+
+  - name: test_null_scalar_parameter
+    source:
+      connection: source_oracle
+      query: >
+        SELECT order_id, customer_id, order_date, status, total_amount, entity_id, created_at, updated_at
+        FROM orders
+        WHERE (:null_param IS NULL)
+    target:
+      connection: target_oracle
+      table: stg_orders
+      batch_size: 1000
+
+post_sql:
+  # Parameterized post_sql check: clean up our pre_sql dummy product
+  - connection: target_oracle
+    query: "DELETE FROM stg_products WHERE product_id = 999 AND category = :status"
+
+parameters:
+  status:
+    type: static
+    value: "ACTIVE"
+  status_other:
+    type: static
+    value: "PENDING"
+  status_other_amount:
+    type: static
+    value: 90.0
+  category_list:
+    type: static
+    value: ["Electronics", "Furniture"]
+  large_entity_list:
+    type: query
+    connection: source_oracle
+    query: "SELECT 'ENT' || LPAD(LEVEL, 4, '0') AS entity_id FROM DUAL CONNECT BY LEVEL <= 1005"
+    column: entity_id
+  special_category_list:
+    type: static
+    value: ["O'Connor's Specials", "Books'n'Stuff"]
+  null_param:
+    type: static
+    value: null
