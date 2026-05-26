@@ -67,7 +67,15 @@ class OracleAdapter(BaseAdapter):
         finally:
             cursor.close()
 
-    def insert_batch(self, table: str, rows: list[dict[str, Any]]) -> int:
+    def commit(self) -> None:
+        if self._connection is not None:
+            self._connection.commit()
+
+    def rollback(self) -> None:
+        if self._connection is not None:
+            self._connection.rollback()
+
+    def insert_batch(self, table: str, rows: list[dict[str, Any]], commit: bool = True) -> int:
         if not rows:
             return 0
         columns = list(rows[0].keys())
@@ -78,7 +86,8 @@ class OracleAdapter(BaseAdapter):
         try:
             data = [{c: row[c] for c in columns} for row in rows]
             cursor.executemany(sql, data)
-            self.connection.commit()
+            if commit:
+                self.connection.commit()
             return cursor.rowcount
         finally:
             cursor.close()
